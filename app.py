@@ -133,7 +133,7 @@ async def run_code(request: CodeRequest):
             # Use Verilator for SystemVerilog
             result = await run_verilator_simulation(
                 request.code,
-                problem.get("testbench_sv", problem["testbench"]),
+                problem.get("testbench_sv", problem.get("testbench", "")),  # ← FIXED!
                 request.generate_waveform,
                 request.enable_assertions,
                 request.enable_coverage,
@@ -143,7 +143,7 @@ async def run_code(request: CodeRequest):
             # Use Icarus for simple Verilog
             result = run_iverilog_simulation(
                 request.code,
-                problem["testbench"],
+                problem.get("testbench", problem.get("testbench_sv", "")),  # ← FIXED!
                 request.generate_waveform,
                 problem["title"]
             )
