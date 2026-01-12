@@ -311,6 +311,9 @@ def _run_verilator_simulation_sync(
             # Build Verilator command
             cmd = [
                 "verilator",
+                "--sv",
+                "--timing",
+
                 "--cc", "--exe", "--build",
                 "--top-module", "tb",
                 "-o", "simulation",
