@@ -251,7 +251,12 @@ async def run_verilator_simulation(
 ) -> dict:
     """Run SystemVerilog simulation using Verilator"""
     
-    # Get running loop - FIXED!
+    # === FIX THE SYNTAX HERE FIRST ===
+    user_code = fix_systemverilog_syntax(user_code)
+    testbench = fix_systemverilog_syntax(testbench)
+    # =================================
+    
+    # Get running loop
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -267,7 +272,29 @@ async def run_verilator_simulation(
     )
     
     return result
-
+def fix_systemverilog_syntax(code: str) -> str:
+    """Fix common SystemVerilog syntax issues for Verilator compatibility"""
+    # Fix @(*) in cover properties - replace with proper clocking
+    if "@(*)" in code and "cover property" in code:
+        # Check if there's a clock in the module
+        if "input logic clk" in code or "input clk" in code:
+            code = code.replace("cover property (@(*)", "cover property (@(posedge clk)")
+        else:
+            # Remove cover properties if no clock
+            lines = code.split('\n')
+            fixed_lines = []
+            for line in lines:
+                if "cover property (@(*)" not in line:
+                    fixed_lines.append(line)
+                else:
+                    # Comment it out
+                    fixed_lines.append("// " + line + " // Commented: needs clock")
+            code = '\n'.join(fixed_lines)
+    
+    # Fix covergroup instantiation
+    code = code.replace("cg cg_inst;", "cg cg_inst = new();")
+    
+    return code
 def _run_verilator_simulation_sync(
     user_code: str, 
     testbench: str, 
@@ -286,6 +313,11 @@ def _run_verilator_simulation_sync(
         tmp_path = Path(tmpdir)
         
         try:
+            # === ADD THE FIX FUNCTION HERE ===
+            user_code = fix_systemverilog_syntax(user_code)
+            testbench = fix_systemverilog_syntax(testbench)
+            # =================================
+            
             user_code, testbench = wrap_testbench_for_verilator(user_code, testbench)
 
             # Prepare files
@@ -305,8 +337,7 @@ def _run_verilator_simulation_sync(
             tb_file = tmp_path / "tb.sv"
             tb_file.write_text(testbench)
             
-    
-                        # Extract module name from code (simplified)
+            # Extract module name from code (simplified)
             module_match = re.search(r'module\s+(\w+)', user_code)
             module_name = module_match.group(1) if module_match else "top_module"
             
@@ -314,17 +345,15 @@ def _run_verilator_simulation_sync(
             wrapper_content = create_verilator_wrapper(module_name, generate_waveform, enable_coverage)
             wrapper_file = tmp_path / "sim_main.cpp"
             wrapper_file.write_text(wrapper_content)
-            # Build Verilator command
-
-
-                        # Build Verilator command for SystemVerilog
+            
+            # Build Verilator command for SystemVerilog
             cmd = [
                 "verilator",
                 "--sv",
                 "-cc",
                 "--exe",
                 "--build",
-                "--top-module", module_name,  # Use detected module name
+                "--top-module", module_name,
                 "-o", "simulation",
                 "-Wno-fatal",
                 "-Wno-WIDTH",
@@ -333,12 +362,23 @@ def _run_verilator_simulation_sync(
                 "-Wno-UNDRIVEN",
                 "--Mdir", str(tmp_path / "obj_dir")
             ]
+            
+            # Add SystemVerilog flags
+            cmd.append("--sv")  # Explicitly enable SystemVerilog
+            
             if enable_assertions:
                 cmd.append("--assert")
             if enable_coverage:
                 cmd.append("--coverage")
             if generate_waveform:
                 cmd.append("--trace")
+            
+            # For SystemVerilog assertions and properties
+            cmd.extend([
+                "+1364-2005ext+v",  # Enable SV extensions
+                "+1800-2012ext+v",
+                "--bbox-unsup",  # Blackbox unsupported features
+            ])
             
             cmd.extend([
                 str(design_file),
@@ -347,20 +387,28 @@ def _run_verilator_simulation_sync(
             ])
             
             # Compile with Verilator
-            logger.info(f"Compiling with Verilator")
+            logger.info(f"Compiling with Verilator: {' '.join(cmd)}")
             compile_result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 cwd=tmp_path,
-                timeout=30
+                timeout=60  # Increased timeout for SV compilation
             )
             
             if compile_result.returncode != 0:
+                # Provide more helpful error message
+                error_msg = compile_result.stderr or compile_result.stdout
+                logger.error(f"Verilator compilation failed: {error_msg[:500]}")
+                
+                # Check for common issues
+                if "syntax error" in error_msg and "@(*)" in error_msg:
+                    error_msg += "\n\nTIP: Use '@(posedge clk)' instead of '@(*)' for cover properties in sequential contexts."
+                
                 return {
                     "success": False,
                     "error": "Verilator Compilation Failed",
-                    "details": compile_result.stderr[:500] if compile_result.stderr else "No error output",
+                    "details": error_msg[:1000],
                     "backend": "verilator",
                     "execution_time": time.time() - start_time
                 }
@@ -373,6 +421,8 @@ def _run_verilator_simulation_sync(
                 cwd=tmp_path,
                 timeout=timeout
             )
+            
+            # Rest of the function remains the same...
             
             execution_time = time.time() - start_time
             
