@@ -32,13 +32,13 @@ RUN apt-get update && apt-get install -y \
 # Configure tzdata non-interactively
 RUN DEBIAN_FRONTEND=noninteractive dpkg-reconfigure tzdata
 
-# Install Verilator with single-threaded build (reduces memory)
+# Install Verilator with SystemVerilog support
 RUN git clone https://github.com/verilator/verilator /tmp/verilator \
     && cd /tmp/verilator \
-    && git checkout v4.214 \
+    && git checkout v5.018  # Use newer version for better SV support
     && autoconf \
     && ./configure \
-    && make -j1 \
+    && make -j$(nproc) \
     && make install \
     && cd / \
     && rm -rf /tmp/verilator
