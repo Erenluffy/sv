@@ -1,28 +1,39 @@
 FROM ubuntu:22.04
 
-# Set non-interactive frontend and timezone
+# Set non-interactive frontend and timezone to avoid prompts
 ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=Etc/UTC
+ENV TZ=America/New_York  # or Etc/UTC or any timezone you prefer
 
-# Use Alpine for smaller image (more efficient)
-FROM ubuntu:22.04
+# Pre-configure tzdata to avoid interactive prompts
+RUN ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
+    echo $TZ > /etc/timezone
 
-# Install minimal dependencies first
+# Now install packages
 RUN apt-get update && apt-get install -y \
     git build-essential \
     autoconf automake autotools-dev \
     libfl2 libfl-dev \
     bison flex gperf \
     python3 python3-pip \
+    libgoogle-perftools-dev \
+    libboost-all-dev \
     libz-dev cmake \
     gtkwave iverilog \
+    # Essential for Verilator build
     help2man \
     texinfo \
+    wget curl \
     libssl-dev \
     g++ \
     make \
     perl \
+    tzdata \
+    # Additional useful tools
+    vim nano \
     && rm -rf /var/lib/apt/lists/*
+
+# Configure tzdata non-interactively
+RUN DEBIAN_FRONTEND=noninteractive dpkg-reconfigure tzdata
 
 # Install Verilator with single-threaded build (reduces memory)
 RUN git clone https://github.com/verilator/verilator /tmp/verilator \
@@ -35,6 +46,9 @@ RUN git clone https://github.com/verilator/verilator /tmp/verilator \
     && make install \
     && cd / \
     && rm -rf /tmp/verilator
+
+# Verify installation
+RUN verilator --version
 
 # Install Python dependencies
 COPY requirements.txt .
