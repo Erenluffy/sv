@@ -2,11 +2,10 @@ FROM ubuntu:22.04
 
 # Set non-interactive frontend and timezone to avoid prompts
 ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=America/New_York  # or Etc/UTC or any timezone you prefer
+ENV TZ=Etc/UTC
 
 # Pre-configure tzdata to avoid interactive prompts
-RUN ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
-    echo $TZ > /etc/timezone
+RUN ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # Now install packages
 RUN apt-get update && apt-get install -y \
@@ -19,7 +18,6 @@ RUN apt-get update && apt-get install -y \
     libboost-all-dev \
     libz-dev cmake \
     gtkwave iverilog \
-    # Essential for Verilator build
     help2man \
     texinfo \
     wget curl \
@@ -28,7 +26,6 @@ RUN apt-get update && apt-get install -y \
     make \
     perl \
     tzdata \
-    # Additional useful tools
     vim nano \
     && rm -rf /var/lib/apt/lists/*
 
@@ -41,7 +38,6 @@ RUN git clone https://github.com/verilator/verilator /tmp/verilator \
     && git checkout v4.214 \
     && autoconf \
     && ./configure \
-    # Single thread to reduce memory usage
     && make -j1 \
     && make install \
     && cd / \
