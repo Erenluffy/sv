@@ -4,7 +4,7 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 
-# Install build dependencies
+# Install ALL required dependencies
 RUN apt-get update && apt-get install -y \
     git build-essential \
     autoconf automake autotools-dev \
@@ -19,14 +19,15 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     g++ \
     make \
+    perl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Verilator v5.008 (more stable than v5.018)
+# Install Verilator v5.008 without man pages
 RUN git clone https://github.com/verilator/verilator /tmp/verilator \
     && cd /tmp/verilator \
     && git checkout v5.008 \
     && autoconf \
-    && ./configure \
+    && ./configure --disable-man \
     && make -j$(nproc) \
     && make install \
     && cd / \
@@ -34,6 +35,8 @@ RUN git clone https://github.com/verilator/verilator /tmp/verilator \
 
 # Verify installation
 RUN verilator --version
+
+# Rest of the Dockerfile remains the same...
 
 # Install Python dependencies
 COPY requirements.txt .
