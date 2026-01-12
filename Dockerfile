@@ -35,7 +35,7 @@ RUN DEBIAN_FRONTEND=noninteractive dpkg-reconfigure tzdata
 # Install Verilator with SystemVerilog support
 RUN git clone https://github.com/verilator/verilator /tmp/verilator \
     && cd /tmp/verilator \
-    && git checkout v5.018  # Use newer version for better SV support
+    && git checkout v5.018 \
     && autoconf \
     && ./configure \
     && make -j$(nproc) \
