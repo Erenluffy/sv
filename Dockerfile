@@ -1,5 +1,9 @@
 FROM ubuntu:22.04
 
+# Set non-interactive frontend and timezone
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Etc/UTC
+
 # Install dependencies
 RUN apt-get update && apt-get install -y \
     git build-essential \
