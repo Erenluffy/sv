@@ -15,6 +15,9 @@ RUN apt-get update && apt-get install -y \
     libboost-all-dev \
     libz-dev cmake \
     gtkwave iverilog \
+    # Essential for Verilator build
+    help2man \
+    texinfo \
     wget curl \
     libssl-dev \
     g++ \
@@ -22,12 +25,12 @@ RUN apt-get update && apt-get install -y \
     perl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Verilator v5.008 without man pages
+# Install Verilator v5.008 (with all dependencies now)
 RUN git clone https://github.com/verilator/verilator /tmp/verilator \
     && cd /tmp/verilator \
     && git checkout v5.008 \
     && autoconf \
-    && ./configure --disable-man \
+    && ./configure \
     && make -j$(nproc) \
     && make install \
     && cd / \
@@ -35,8 +38,6 @@ RUN git clone https://github.com/verilator/verilator /tmp/verilator \
 
 # Verify installation
 RUN verilator --version
-
-# Rest of the Dockerfile remains the same...
 
 # Install Python dependencies
 COPY requirements.txt .
