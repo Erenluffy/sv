@@ -4,7 +4,7 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 
-# Install dependencies including Verilator from Ubuntu repo
+# Install build dependencies
 RUN apt-get update && apt-get install -y \
     git build-essential \
     autoconf automake autotools-dev \
@@ -15,21 +15,25 @@ RUN apt-get update && apt-get install -y \
     libboost-all-dev \
     libz-dev cmake \
     gtkwave iverilog \
-    verilator \
-    curl wget \
+    wget curl \
+    libssl-dev \
+    g++ \
+    make \
     && rm -rf /var/lib/apt/lists/*
 
-# Install a newer Verilator version (v4.214) from source if needed
-# The Ubuntu repo version (v4.214) should work, but if you need newer:
+# Install Verilator v5.008 (more stable than v5.018)
 RUN git clone https://github.com/verilator/verilator /tmp/verilator \
     && cd /tmp/verilator \
-    && git checkout v4.214 \
+    && git checkout v5.008 \
     && autoconf \
     && ./configure \
     && make -j$(nproc) \
     && make install \
     && cd / \
     && rm -rf /tmp/verilator
+
+# Verify installation
+RUN verilator --version
 
 # Install Python dependencies
 COPY requirements.txt .
