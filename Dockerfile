@@ -4,54 +4,32 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 
-# Install ALL dependencies in one layer (reduces size)
+# Install dependencies including Verilator from Ubuntu repo
 RUN apt-get update && apt-get install -y \
     git build-essential \
     autoconf automake autotools-dev \
     libfl2 libfl-dev \
     bison flex gperf \
-    python3 python3-pip python3-dev \
+    python3 python3-pip \
     libgoogle-perftools-dev \
-    libboost-filesystem-dev libboost-iostreams-dev \
-    libboost-program-options-dev libboost-system-dev libboost-thread-dev \
+    libboost-all-dev \
     libz-dev cmake \
     gtkwave iverilog \
-    libncurses-dev libreadline-dev \
-    perl help2man \
-    g++-11 gcc-11 \
-    libssl-dev zlib1g-dev \
-    tcl-dev \
+    verilator \
+    curl wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Set up gcc-11 as default
-RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 110 \
-    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 110
-
-# Install Verilator with FIXED version (use stable branch instead)
-RUN cd /tmp \
-    && git clone https://github.com/verilator/verilator \
-    && cd verilator \
-    # Use stable branch instead of specific tag
-    && git checkout stable \
+# Install a newer Verilator version (v4.214) from source if needed
+# The Ubuntu repo version (v4.214) should work, but if you need newer:
+RUN git clone https://github.com/verilator/verilator /tmp/verilator \
+    && cd /tmp/verilator \
+    && git checkout v4.214 \
     && autoconf \
-    # Configure with minimal options
-    && ./configure --prefix=/usr/local \
-    # Build with reduced optimization for compatibility
+    && ./configure \
     && make -j$(nproc) \
     && make install \
     && cd / \
     && rm -rf /tmp/verilator
-
-# Alternative: Install from apt (simpler but older)
-# RUN apt-get install -y verilator
-
-# Verify installation
-RUN echo "=== Verilator Test ===" \
-    && verilator --version \
-    && echo "=== Basic Test ===" \
-    && echo 'module test; initial $display("OK"); endmodule' > /tmp/test.sv \
-    && verilator --cc /tmp/test.sv 2>&1 | head -5 \
-    && echo "=== Installation Successful ==="
 
 # Install Python dependencies
 COPY requirements.txt .
@@ -67,8 +45,7 @@ COPY problems.json .
 COPY problems_sv.json .
 
 # Non-root user
-RUN useradd -m -s /bin/bash appuser \
-    && chown -R appuser:appuser /app
+RUN useradd -m -s /bin/bash appuser
 USER appuser
 
 EXPOSE 8000
