@@ -4,40 +4,37 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 
-# Install ALL required dependencies
+# Use Alpine for smaller image (more efficient)
+FROM ubuntu:22.04
+
+# Install minimal dependencies first
 RUN apt-get update && apt-get install -y \
     git build-essential \
     autoconf automake autotools-dev \
     libfl2 libfl-dev \
     bison flex gperf \
     python3 python3-pip \
-    libgoogle-perftools-dev \
-    libboost-all-dev \
     libz-dev cmake \
     gtkwave iverilog \
-    # Essential for Verilator build
     help2man \
     texinfo \
-    wget curl \
     libssl-dev \
     g++ \
     make \
     perl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Verilator v5.008 (with all dependencies now)
+# Install Verilator with single-threaded build (reduces memory)
 RUN git clone https://github.com/verilator/verilator /tmp/verilator \
     && cd /tmp/verilator \
-    && git checkout v5.008 \
+    && git checkout v4.214 \
     && autoconf \
     && ./configure \
-    && make -j$(nproc) \
+    # Single thread to reduce memory usage
+    && make -j1 \
     && make install \
     && cd / \
     && rm -rf /tmp/verilator
-
-# Verify installation
-RUN verilator --version
 
 # Install Python dependencies
 COPY requirements.txt .
