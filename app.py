@@ -286,6 +286,8 @@ def _run_verilator_simulation_sync(
         tmp_path = Path(tmpdir)
         
         try:
+            user_code, testbench = wrap_testbench_for_verilator(user_code, testbench)
+
             # Prepare files
             design_file = tmp_path / "design.sv"
             design_file.write_text(user_code)
@@ -303,26 +305,34 @@ def _run_verilator_simulation_sync(
             tb_file = tmp_path / "tb.sv"
             tb_file.write_text(testbench)
             
-            # Create C++ wrapper - FIXED to be more robust
-            wrapper_content = create_verilator_wrapper(generate_waveform, enable_coverage)
+    
+                        # Extract module name from code (simplified)
+            module_match = re.search(r'module\s+(\w+)', user_code)
+            module_name = module_match.group(1) if module_match else "top_module"
+            
+            # Create C++ wrapper - FIXED!
+            wrapper_content = create_verilator_wrapper(module_name, generate_waveform, enable_coverage)
             wrapper_file = tmp_path / "sim_main.cpp"
             wrapper_file.write_text(wrapper_content)
-            
             # Build Verilator command
+
+
+                        # Build Verilator command for SystemVerilog
             cmd = [
                 "verilator",
                 "--sv",
-                "--timing",
-
-                "--cc", "--exe", "--build",
-                "--top-module", "tb",
+                "-cc",
+                "--exe",
+                "--build",
+                "--top-module", module_name,  # Use detected module name
                 "-o", "simulation",
                 "-Wno-fatal",
                 "-Wno-WIDTH",
                 "-Wno-STMTDLY",
+                "-Wno-UNUSED",
+                "-Wno-UNDRIVEN",
                 "--Mdir", str(tmp_path / "obj_dir")
             ]
-            
             if enable_assertions:
                 cmd.append("--assert")
             if enable_coverage:
@@ -412,7 +422,34 @@ def _run_verilator_simulation_sync(
                 "backend": "verilator",
                 "execution_time": time.time() - start_time
             }
-
+def wrap_testbench_for_verilator(user_code: str, testbench_code: str) -> tuple:
+    """Wrap testbench to make it compatible with Verilator"""
+    # Extract module name from user code
+    module_match = re.search(r'module\s+(\w+)', user_code)
+    if not module_match:
+        return user_code, testbench_code
+    
+    module_name = module_match.group(1)
+    
+    # Check if testbench is a proper module
+    if "module tb" in testbench_code or "module testbench" in testbench_code:
+        return user_code, testbench_code
+    
+    # If testbench is just a procedural block, wrap it
+    if "initial begin" in testbench_code and "endmodule" not in testbench_code:
+        wrapped_tb = f"""
+`timescale 1ns/1ps
+module tb();
+    // Instantiate DUT
+    {module_name} dut();
+    
+    // Include the testbench code
+    {testbench_code}
+endmodule
+"""
+        return user_code, wrapped_tb
+    
+    return user_code, testbench_code
 def run_iverilog_simulation(user_code: str, testbench: str, generate_waveform: bool, problem_title: str) -> dict:
     """Fallback to Icarus Verilog for simple Verilog"""
     waveform_id = None
@@ -495,35 +532,43 @@ def run_iverilog_simulation(user_code: str, testbench: str, generate_waveform: b
                 "execution_time": execution_time
             }
 
-def create_verilator_wrapper(generate_waveform: bool, enable_coverage: bool) -> str:
-    """Create C++ wrapper for Verilator simulation"""
-    # Note: This assumes testbench module is named "tb"
-    # For production, you might need to make this dynamic
-    return """#include "Vtb.h"
+def create_verilator_wrapper(module_name: str = "top_module", generate_waveform: bool = False, enable_coverage: bool = False) -> str:
+    """Create C++ wrapper for Verilator simulation - FIXED VERSION"""
+    return f"""#include "V{module_name}.h"
 #include "verilated.h"
 #include "verilated_vcd_c.h"
 #include "verilated_cov.h"
 #include <iostream>
 #include <cstdlib>
+#include <cstdio>
 
 // Global assertion counters
 int assertion_pass_count = 0;
 int assertion_fail_count = 0;
 
 // Assertion callback
-void assertion_callback(const char* msg) {
-    if (msg) {
+void assertion_callback(const char* msg) {{
+    if (msg) {{
         std::string message(msg);
-        if (message.find("failed") != std::string::npos) {
+        if (message.find("failed") != std::string::npos || 
+            message.find("error") != std::string::npos ||
+            message.find("Error") != std::string::npos) {{
             assertion_fail_count++;
             std::cout << "[ASSERTION FAILED] " << message << std::endl;
-        } else if (message.find("passed") != std::string::npos) {
+        }} else if (message.find("passed") != std::string::npos ||
+                   message.find("Success") != std::string::npos) {{
             assertion_pass_count++;
-        }
-    }
-}
+            std::cout << "[ASSERTION PASSED]" << std::endl;
+        }}
+    }}
+}}
 
-int main(int argc, char** argv) {
+// SystemVerilog $display callback
+void vl_print_callback(const char* msg) {{
+    std::cout << "[SV] " << msg;
+}}
+
+int main(int argc, char** argv) {{
     // Initialize
     Verilated::commandArgs(argc, argv);
     Verilated::traceEverOn(true);
@@ -532,61 +577,102 @@ int main(int argc, char** argv) {
     // Set assertion callback
     Verilated::setAssertCallback(assertion_callback);
     
-    // Create instance - assumes module name is "tb"
-    Vtb* top = new Vtb;
+    // Set print callback to capture $display
+    Verilated::setVPrintCallback(vl_print_callback);
+    
+    // Create instance
+    V{module_name}* top = new V{module_name};
     
     // Create waveform dump if needed
     VerilatedVcdC* tfp = nullptr;
-""" + (f'''    tfp = new VerilatedVcdC;
-    top->trace(tfp, 99);
-    tfp->open("waveform.vcd");''' if generate_waveform else '    // No waveform tracing') + """
+"""
     
-    // Initialize clock if exists
-    if (top->clk != nullptr) {
-        top->clk = 0;
-    }
+    if generate_waveform:
+        wrapper = f"""    tfp = new VerilatedVcdC;
+    top->trace(tfp, 99);
+    tfp->open("waveform.vcd");"""
+    else:
+        wrapper = """    // No waveform tracing"""
+    
+    wrapper += f"""
+    
+    // Initialize
+    top->eval();
     
     // Main simulation loop
     int cycle = 0;
-    int max_cycles = 1000;
+    int max_cycles = 500;  // Reduced for safety
     
-    while (!Verilated::gotFinish() && cycle < max_cycles) {
-        // Toggle clock if exists
-        if (top->clk != nullptr) {
-            top->clk = !top->clk;
-        }
-        
+    // Check if we have a clock
+    bool has_clock = false;
+    try {{
+        // Try to detect clock - Verilator doesn't expose this easily
+        // We'll just simulate for a fixed number of cycles
+    }} catch (...) {{}}
+    
+    while (!Verilated::gotFinish() && cycle < max_cycles) {{
+        // If there's a clock signal, toggle it
+        // Note: This is a simplified approach
+"""
+    
+    if "clk" in module_name.lower():  # Simple heuristic
+        wrapper += """        // Assuming clock exists based on module name
+        top->clk = !top->clk;
+"""
+    else:
+        wrapper += """        // No clock toggling
+"""
+    
+    wrapper += f"""        
         // Evaluate
         top->eval();
         
         // Dump waveform
-""" + (f'''        if (tfp) tfp->dump(cycle * 10);''' if generate_waveform else '') + """
+"""
+    
+    if generate_waveform:
+        wrapper += """        if (tfp) tfp->dump(cycle * 10);"""
+    
+    wrapper += f"""
         
         cycle++;
         
         // Break if too many assertion failures
-        if (assertion_fail_count > 10) {
+        if (assertion_fail_count > 10) {{
             std::cout << "Too many assertion failures, stopping simulation" << std::endl;
             break;
-        }
-    }
+        }}
+    }}
     
     // Final outputs
     std::cout << "\\n=== VERILATOR SIMULATION RESULTS ===" << std::endl;
     std::cout << "Cycles simulated: " << cycle << std::endl;
     std::cout << "Assertions passed: " << assertion_pass_count << std::endl;
     std::cout << "Assertions failed: " << assertion_fail_count << std::endl;
+    std::cout << "Simulation " << ((assertion_fail_count == 0) ? "PASSED" : "FAILED") << std::endl;
     
     // Save coverage data if enabled
-""" + (f'''    VerilatedCov::write("coverage.dat");''' if enable_coverage else '    // No coverage collection') + """
+"""
+    
+    if enable_coverage:
+        wrapper += """    VerilatedCov::write("coverage.dat");"""
+    
+    wrapper += f"""
     
     // Cleanup
-""" + (f'''    if (tfp) {{ tfp->close(); delete tfp; }}''' if generate_waveform else '') + """
+"""
+    
+    if generate_waveform:
+        wrapper += """    if (tfp) { tfp->close(); delete tfp; }"""
+    
+    wrapper += f"""
     delete top;
     
     return (assertion_fail_count == 0) ? 0 : 1;
-}
+}}
 """
+    
+    return wrapper
 
 def parse_assertion_results(output: str) -> dict:
     """Parse assertion results from simulation output"""
