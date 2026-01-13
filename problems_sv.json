@@ -78,6 +78,28 @@
     "testbench_sv": "`timescale 1ns/1ps\nmodule tb();\n  logic clk = 0, rd_en = 0, empty = 1;\n  always #5 clk = ~clk;\n\n  top_module dut (.*);\n\n  initial begin\n    #10 rd_en = 1;\n    #20 empty = 0;\n    #20 rd_en = 0;\n    #50 $finish;\n  end\nendmodule"
   },
   {
+    "id": "sequence_assertion",
+    "title": "Sequence Detection with SVA",
+    "description": "Implement a 101 sequence detector with SystemVerilog Assertions",
+    "difficulty": "medium",
+    "category": "Assertions",
+    "supports_sv": true,
+    "has_assertions": true,
+    "template": "module sequence_detector(\n  input  logic clk,\n  input  logic reset,\n  input  logic data,\n  output logic detected\n);\n  // Your implementation here\n  \n  // SVA: Detect sequence 101\n  property p_sequence_101;\n    @(posedge clk) disable iff (reset)\n    data ##1 !data ##1 data |-> detected;\n  endproperty\n  \n  assert property(p_sequence_101)\n    else $error(\"Sequence 101 detection failed\");\n  \nendmodule",
+    "testbench_sv": "module tb();\n  logic clk = 0;\n  logic reset;\n  logic data;\n  logic detected;\n  \n  always #5 clk = ~clk;\n  \n  sequence_detector dut (.*);\n  \n  initial begin\n    reset = 1;\n    data = 0;\n    detected = 0;\n    #20 reset = 0;\n    \n    // Test sequence\n    data = 1; #10; // 1\n    data = 0; #10; // 0\n    data = 1; #10; // 1 - should detect\n    \n    #50;\n    $display(\"Test complete\");\n    $finish;\n  end\nendmodule"
+  },
+  {
+    "id": "cover_property_example",
+    "title": "Coverage Properties",
+    "description": "Learn to use cover properties in SystemVerilog",
+    "difficulty": "medium",
+    "category": "Coverage",
+    "supports_sv": true,
+    "has_assertions": true,
+    "template": "module cover_example(\n  input  logic clk,\n  input  logic req,\n  input  logic ack,\n  output logic done\n);\n  logic [1:0] state;\n  \n  // Simple state machine\n  always_ff @(posedge clk) begin\n    if (req) state <= 2'b01;\n    else if (ack) state <= 2'b10;\n    else if (done) state <= 2'b00;\n  end\n  \n  assign done = (state == 2'b10);\n  \n  // Cover property: req followed by ack\n  cover property (@(posedge clk) req ##[1:5] ack)\n    $display(\"Cover hit: req->ack\");\n  \n  // Cover all states\n  cover property (@(posedge clk) state == 2'b00);\n  cover property (@(posedge clk) state == 2'b01);\n  cover property (@(posedge clk) state == 2'b10);\n  \nendmodule",
+    "testbench_sv": "module tb();\n  logic clk = 0;\n  logic req, ack, done;\n  \n  always #5 clk = ~clk;\n  \n  cover_example dut (.*);\n  \n  initial begin\n    req = 0; ack = 0;\n    #20;\n    \n    // Generate some coverage\n    repeat (3) begin\n      req = 1; #10;\n      req = 0; #20;\n      ack = 1; #10;\n      ack = 0; #20;\n    end\n    \n    #100;\n    $display(\"Coverage test complete\");\n    $finish;\n  end\nendmodule"
+  },
+  {
     "id": "dff_sv",
     "title": "D Flip-Flop with Properties",
     "description": "Implement a positive-edge triggered D flip-flop with SystemVerilog properties and assertions.",
