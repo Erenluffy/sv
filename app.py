@@ -305,7 +305,7 @@ def _run_verilator_simulation_sync(
     constraints: str = None,
     timeout: int = 10
 ) -> dict:
-    """Synchronous Verilator execution"""
+    """Synchronous Verilator execution - FIXED VERSION"""
     waveform_id = None
     start_time = time.time()
     
@@ -313,11 +313,9 @@ def _run_verilator_simulation_sync(
         tmp_path = Path(tmpdir)
         
         try:
-            # === ADD THE FIX FUNCTION HERE ===
+            # Fix syntax
             user_code = fix_systemverilog_syntax(user_code)
             testbench = fix_systemverilog_syntax(testbench)
-            # =================================
-            
             user_code, testbench = wrap_testbench_for_verilator(user_code, testbench)
 
             # Prepare files
@@ -337,79 +335,86 @@ def _run_verilator_simulation_sync(
             tb_file = tmp_path / "tb.sv"
             tb_file.write_text(testbench)
             
-            # Extract module name from code (simplified)
+            # Extract module name
             module_match = re.search(r'module\s+(\w+)', user_code)
             module_name = module_match.group(1) if module_match else "top_module"
             
-            # Create C++ wrapper - FIXED!
+            # Create C++ wrapper
             wrapper_content = create_verilator_wrapper(module_name, generate_waveform, enable_coverage)
             wrapper_file = tmp_path / "sim_main.cpp"
             wrapper_file.write_text(wrapper_content)
             
-            # Build Verilator command for SystemVerilog
+            # Build Verilator command - FIXED!
             cmd = [
                 "verilator",
-                "--sv",  # Enable SystemVerilog
-                "-cc",
+                "--cc",  # Changed from -cc to --cc
                 "--exe",
                 "--build",
                 "--top-module", module_name,
                 "-o", "simulation",
-                "--assert",  # Enable assertions
-                "-Wall",  # Enable all warnings
-                "--bbox-unsup",  # Blackbox unsupported
-                "--timing",  # Enable timing checks
-                "--x-assign", "unique",  # Better X handling
-                "--x-initial", "unique",
-                "--coverage-user",  # User coverage
+                "-Wall",  # All warnings
             ]
             
-            # Add conditional flags
-            if enable_assertions:
-                cmd.extend(["--assert"])
-            if enable_coverage:
-                cmd.extend(["--coverage", "--coverage-line", "--coverage-toggle"])
-            if generate_waveform:
-                cmd.extend(["--trace"])
+            # Add SystemVerilog support (use --language instead of --sverilog)
+            cmd.append("--language")
+            cmd.append("1800-2012")  # SystemVerilog 2012
             
-            # Add SystemVerilog features
+            if enable_assertions:
+                cmd.append("--assert")
+            
+            if enable_coverage:
+                cmd.extend(["--coverage", "--coverage-line"])
+            
+            if generate_waveform:
+                cmd.append("--trace")
+            
+            # Add tolerance for common warnings
             cmd.extend([
-                "+1364-2005ext+v",
-                "+1800-2012ext+v",
-                "--sverilog",  # Full SystemVerilog support
-                "-Wno-fatal",  # Don't stop on first error
+                "-Wno-fatal",
                 "-Wno-WIDTH",
                 "-Wno-STMTDLY",
                 "-Wno-UNUSED",
                 "-Wno-UNDRIVEN",
                 "-Wno-PINMISSING",
                 "-Wno-MULTIDRIVEN",
+                "-Wno-CASEOVERLAP",
+                "-Wno-IMPLICIT",
+                "--bbox-unsup",
             ])
             
+            # Add files
             cmd.extend([
                 str(design_file),
                 str(tb_file),
                 str(wrapper_file)
             ])
             
+            logger.info(f"Compiling with Verilator: {' '.join(cmd[:10])}...")
+            
             # Compile with Verilator
-            logger.info(f"Compiling with Verilator: {' '.join(cmd)}")
             compile_result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 cwd=tmp_path,
-                timeout=60  # Increased timeout for SV compilation
+                timeout=60
             )
             
             if compile_result.returncode != 0:
-                # Provide more helpful error message
                 error_msg = compile_result.stderr or compile_result.stdout
-                logger.error(f"Verilator compilation failed: {error_msg[:500]}")
+                logger.error(f"Verilator compilation failed (first 500 chars): {error_msg[:500]}")
                 
-                # Check for common issues
-                if "syntax error" in error_msg and "@(*)" in error_msg:
-                    error_msg += "\n\nTIP: Use '@(posedge clk)' instead of '@(*)' for cover properties in sequential contexts."
+                # Provide helpful hints
+                hints = []
+                if "syntax error" in error_msg:
+                    hints.append("Check SystemVerilog syntax")
+                if "undeclared" in error_msg:
+                    hints.append("Check variable declarations")
+                if "cannot find" in error_msg:
+                    hints.append("Check module instantiation")
+                
+                if hints:
+                    error_msg += f"\n\nHints: {', '.join(hints)}"
                 
                 return {
                     "success": False,
@@ -420,36 +425,65 @@ def _run_verilator_simulation_sync(
                 }
             
             # Run simulation
-            sim_result = subprocess.run(
-                [str(tmp_path / "simulation")],
-                capture_output=True,
-                text=True,
-                cwd=tmp_path,
-                timeout=timeout
-            )
+            sim_path = tmp_path / "simulation"
+            if not sim_path.exists():
+                # Try alternative path
+                sim_path = tmp_path / "V" / "simulation"
             
-            # Rest of the function remains the same...
+            if sim_path.exists():
+                sim_result = subprocess.run(
+                    [str(sim_path)],
+                    capture_output=True,
+                    text=True,
+                    cwd=tmp_path,
+                    timeout=timeout
+                )
+            else:
+                # Fallback: try running from obj_dir
+                obj_dir = tmp_path / "obj_dir"
+                if (obj_dir / "simulation").exists():
+                    sim_result = subprocess.run(
+                        [str(obj_dir / "simulation")],
+                        capture_output=True,
+                        text=True,
+                        cwd=tmp_path,
+                        timeout=timeout
+                    )
+                else:
+                    # List files for debugging
+                    files = list(tmp_path.rglob("*"))
+                    logger.error(f"Simulation executable not found. Files: {[f.name for f in files]}")
+                    return {
+                        "success": False,
+                        "error": "Simulation executable not found",
+                        "details": "Verilator compilation succeeded but executable not found",
+                        "backend": "verilator",
+                        "execution_time": time.time() - start_time
+                    }
             
             execution_time = time.time() - start_time
-            
-            # Parse results
             output = sim_result.stdout + sim_result.stderr
             
-            # Extract assertion results
+            # Parse results
             assertions = parse_assertion_results(output)
             
             # Extract coverage if enabled
             coverage = {}
-            if enable_coverage and (tmp_path / "coverage.dat").exists():
-                coverage = parse_coverage_data(tmp_path / "coverage.dat")
+            if enable_coverage:
+                coverage_files = list(tmp_path.rglob("coverage*.dat"))
+                for cov_file in coverage_files:
+                    coverage = parse_coverage_data(cov_file)
+                    break
             
             # Save waveform if requested
             if generate_waveform and waveform_id:
-                vcd_file = tmp_path / "waveform.vcd"
-                if vcd_file.exists() and vcd_file.stat().st_size > 0:
-                    dest_vcd = WAVEFORM_DIR / f"{waveform_id}.vcd"
-                    shutil.copy2(vcd_file, dest_vcd)
-                    logger.info(f"Waveform saved: {waveform_id}")
+                vcd_files = list(tmp_path.rglob("*.vcd"))
+                for vcd_file in vcd_files:
+                    if vcd_file.stat().st_size > 0:
+                        dest_vcd = WAVEFORM_DIR / f"{waveform_id}.vcd"
+                        shutil.copy2(vcd_file, dest_vcd)
+                        logger.info(f"Waveform saved: {waveform_id} ({vcd_file.stat().st_size} bytes)")
+                        break
             
             success = sim_result.returncode == 0 and assertions.get("failed", 0) == 0
             
@@ -472,6 +506,7 @@ def _run_verilator_simulation_sync(
                 "execution_time": time.time() - start_time
             }
         except Exception as e:
+            logger.error(f"Internal error: {e}", exc_info=True)
             return {
                 "success": False,
                 "error": f"Internal error: {str(e)}",
@@ -479,7 +514,7 @@ def _run_verilator_simulation_sync(
                 "execution_time": time.time() - start_time
             }
 def wrap_testbench_for_verilator(user_code: str, testbench_code: str) -> tuple:
-    """Wrap testbench to make it compatible with Verilator - ENHANCED"""
+    """Simple testbench wrapper"""
     # Extract module name from user code
     module_match = re.search(r'module\s+(\w+)', user_code)
     if not module_match:
@@ -488,38 +523,19 @@ def wrap_testbench_for_verilator(user_code: str, testbench_code: str) -> tuple:
     module_name = module_match.group(1)
     
     # Check if testbench already has a module
-    if re.search(r'module\s+\w+\s*\(', testbench_code):
+    if "module" in testbench_code and "endmodule" in testbench_code:
         return user_code, testbench_code
     
-    # Check if we need to add a clock
-    has_clock_in_design = 'input.*clk' in user_code or 'input.*clock' in user_code
-    has_clock_in_tb = 'clk' in testbench_code or 'clock' in testbench_code
-    
-    # Enhanced testbench wrapper
+    # Simple wrapper
     wrapped_tb = f"""
 `timescale 1ns/1ps
 
 module tb();
-    // Clock generation (if needed)
-    {"logic clk = 0;" if (has_clock_in_design and not has_clock_in_tb) else ""}
-    {"always #5 clk = ~clk;" if (has_clock_in_design and not has_clock_in_tb) else ""}
-    
     // Instantiate DUT
-    {module_name} dut(
-        {".clk(clk)," if (has_clock_in_design and not has_clock_in_tb) else ""}
-        .*
-    );
+    {module_name} dut();
     
     // Include the testbench code
     {testbench_code}
-    
-    // Simulation control
-    initial begin
-        {"#1000;" if has_clock_in_design else "#100;"}
-        $display("\\n=== SIMULATION COMPLETE ===");
-        $display("Time: %0t ns", $time);
-        $finish;
-    end
 endmodule
 """
     return user_code, wrapped_tb
@@ -606,93 +622,18 @@ def run_iverilog_simulation(user_code: str, testbench: str, generate_waveform: b
             }
 
 def create_verilator_wrapper(module_name: str = "top_module", generate_waveform: bool = False, enable_coverage: bool = False) -> str:
-    """Create C++ wrapper for Verilator simulation - ENHANCED SVA SUPPORT"""
+    """Create C++ wrapper for Verilator simulation - SIMPLIFIED COMPATIBLE VERSION"""
     return f"""#include "V{module_name}.h"
 #include "verilated.h"
 #include "verilated_vcd_c.h"
-#include "verilated_cov.h"
-#include "verilated_save.h"
 #include <iostream>
-#include <cstdlib>
-#include <cstdio>
-#include <string>
-#include <vector>
-
-// Global counters
-struct SimulationStats {{
-    int cycles = 0;
-    int assertion_passes = 0;
-    int assertion_fails = 0;
-    int coverage_hits = 0;
-    std::vector<std::string> errors;
-    std::vector<std::string> warnings;
-}};
-
-SimulationStats stats;
-
-// Enhanced message handler for Verilator 4.0+
-void vl_msg_handler(const VlMessage* msg) {{
-    if (!msg) return;
-    
-    std::string message(msg->msg);
-    int level = msg->level;
-    
-    // Handle different message types
-    switch(level) {{
-        case VL_MSG_FATAL:
-        case VL_MSG_ERROR:
-            stats.errors.push_back(message);
-            stats.assertion_fails++;
-            std::cout << "[ERROR] " << message << std::endl;
-            break;
-            
-        case VL_MSG_WARNING:
-            stats.warnings.push_back(message);
-            std::cout << "[WARNING] " << message << std::endl;
-            break;
-            
-        case VL_MSG_INFO:
-            if (message.find("Assertion") != std::string::npos) {{
-                if (message.find("passed") != std::string::npos || 
-                    message.find("success") != std::string::npos) {{
-                    stats.assertion_passes++;
-                    std::cout << "[ASSERTION PASS] " << message << std::endl;
-                }} else if (message.find("failed") != std::string::npos) {{
-                    stats.assertion_fails++;
-                    std::cout << "[ASSERTION FAIL] " << message << std::endl;
-                }}
-            }} else if (message.find("Cover") != std::string::npos ||
-                       message.find("cover") != std::string::npos) {{
-                stats.coverage_hits++;
-                std::cout << "[COVERAGE] " << message << std::endl;
-            }} else {{
-                std::cout << "[INFO] " << message << std::endl;
-            }}
-            break;
-            
-        default:
-            std::cout << message;
-            break;
-    }}
-}}
-
-// Function to check for clock in module
-bool has_clock(V{module_name}* module) {{
-    // Check common clock signal names
-    return true; // Assume clock exists for sequential logic
-}}
 
 int main(int argc, char** argv) {{
-    std::cout << "=== VERILATOR SIMULATION START ===" << std::endl;
+    std::cout << "=== VERILATOR SIMULATION ===" << std::endl;
     
-    // Initialize Verilator
+    // Initialize
     Verilated::commandArgs(argc, argv);
-    Verilated::traceEverOn(true);
-    Verilated::assertOn(true);
-    Verilated::coverOn({str(enable_coverage).lower()});
-    
-    // Set message handler
-    Verilated::setMessageHandler(vl_msg_handler);
+    Verilated::traceEverOn(generate_waveform);
     
     // Create instance
     V{module_name}* top = new V{module_name};
@@ -703,104 +644,44 @@ int main(int argc, char** argv) {{
     
     if generate_waveform:
         wrapper = f"""    tfp = new VerilatedVcdC;
-    top->trace(tfp, 99);  // Trace 99 levels of hierarchy
+    top->trace(tfp, 99);
     tfp->open("waveform.vcd");"""
     else:
         wrapper = """    // Waveform tracing disabled"""
     
     wrapper += f"""
     
-    // Initialize all inputs
+    // Initialize
     top->eval();
     
-    // Simulation parameters
-    const int MAX_CYCLES = 1000;
-    const int CLOCK_HALF_PERIOD = 5;
+    // Simple test patterns for 2-input logic
+    int patterns[4][2] = {{{{0, 0}}, {{0, 1}}, {{1, 0}}, {{1, 1}}}};
     int cycle = 0;
-    bool has_clock_signal = has_clock(top);
+    int max_cycles = 100;
     
-    std::cout << "Starting simulation..." << std::endl;
-    std::cout << "Clock detected: " << (has_clock_signal ? "YES" : "NO") << std::endl;
-    std::cout << "Max cycles: " << MAX_CYCLES << std::endl;
-    
-    // Main simulation loop
-    while (!Verilated::gotFinish() && cycle < MAX_CYCLES) {{
-        // Toggle clock if it exists
-        if (has_clock_signal) {{
-            top->clk = !top->clk;
+    while (!Verilated::gotFinish() && cycle < max_cycles) {{
+        // Apply test pattern
+        if (cycle < 4) {{
+            // For combinatorial logic testing
+            top->a = patterns[cycle][0];
+            top->b = patterns[cycle][1];
         }}
         
-        // Apply test vectors for first few cycles
-        if (cycle < 10) {{
-            // Simple test pattern for combinatorial logic
-            // This helps test basic functionality
-            top->a = cycle & 1;
-            top->b = (cycle >> 1) & 1;
-            top->reset = (cycle == 0) ? 1 : 0;
-        }}
-        
-        // Evaluate before clock edge (for setup)
-        if (has_clock_signal) {{
-            top->eval();
-            if (tfp) tfp->dump(cycle * CLOCK_HALF_PERIOD * 2);
-        }}
-        
-        // Evaluate after clock edge
+        // Evaluate
         top->eval();
         
         // Dump waveform
 """
     
     if generate_waveform:
-        wrapper += """        if (tfp && has_clock_signal) {
-            tfp->dump(cycle * CLOCK_HALF_PERIOD * 2 + CLOCK_HALF_PERIOD);
-        } else if (tfp) {
+        wrapper += """        if (tfp) {
             tfp->dump(cycle * 10);
         }"""
     
     wrapper += f"""
         
         cycle++;
-        
-        // Early exit if too many errors
-        if (stats.assertion_fails > 10) {{
-            std::cout << "Too many assertion failures, stopping..." << std::endl;
-            break;
-        }}
     }}
-    
-    // Final evaluation
-    top->eval();
-    
-    // Report results
-    std::cout << "\\n=== VERILATOR SIMULATION RESULTS ===" << std::endl;
-    std::cout << "Cycles simulated: " << cycle << std::endl;
-    std::cout << "Assertion passes: " << stats.assertion_passes << std::endl;
-    std::cout << "Assertion failures: " << stats.assertion_fails << std::endl;
-    std::cout << "Coverage hits: " << stats.coverage_hits << std::endl;
-    std::cout << "Errors: " << stats.errors.size() << std::endl;
-    std::cout << "Warnings: " << stats.warnings.size() << std::endl;
-    
-    if (stats.assertion_fails == 0) {{
-        std::cout << "\\n✅ SIMULATION PASSED" << std::endl;
-    }} else {{
-        std::cout << "\\n❌ SIMULATION FAILED" << std::endl;
-        std::cout << "\\nError details:" << std::endl;
-        for (const auto& err : stats.errors) {{
-            std::cout << "  - " << err << std::endl;
-        }}
-    }}
-    
-    // Save coverage data
-"""
-    
-    if enable_coverage:
-        wrapper += """    if (Verilated::coverOn()) {
-        std::cout << "Saving coverage data..." << std::endl;
-        VerilatedCov::write("coverage.dat");
-    }"""
-    
-    wrapper += f"""
     
     // Cleanup
 """
@@ -815,10 +696,8 @@ int main(int argc, char** argv) {{
     
     delete top;
     
-    // Exit code
-    int exit_code = (stats.assertion_fails == 0) ? 0 : 1;
-    std::cout << "Exit code: " << exit_code << std::endl;
-    return exit_code;
+    std::cout << "\\nSimulation completed (" << cycle << " cycles)" << std::endl;
+    return 0;
 }}
 """
     
