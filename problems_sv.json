@@ -7,8 +7,75 @@
     "category": "Combinational Logic",
     "supports_sv": true,
     "has_assertions": true,
-    "template": "module top_module(input logic a, b, output logic out);\n  // Implement AND gate\n  assign out = a & b;\n  \n  // Add assertions here\n  initial begin\n    $display(\"Starting AND gate simulation with assertions...\");\n  end\n  \n  // Immediate assertion\n  always_comb begin\n    assert (out === (a & b)) \n      else $error(\"AND gate failed: a=%0d, b=%0d, out=%0d\", a, b, out);\n  end\n  \n  // Functional coverage using covergroup (immediate coverage)\n  covergroup cg @(a or b);\n    coverpoint a { bins zero = {0}; bins one = {1}; }\n    coverpoint b { bins zero = {0}; bins one = {1}; }\n    cross a, b;\n  endgroup\n  \n  cg cg_inst = new();\n  \nendmodule",
-    "testbench_sv": "`timescale 1ns/1ps\nmodule tb();\n  logic a, b;\n  logic out;\n  integer passed = 0;\n  integer total = 0;\n  \n  top_module dut (.*);\n  \n  initial begin\n    $display(\"Testing AND gate with SystemVerilog...\");\n    \n    // Test all combinations\n    for (int i = 0; i < 4; i++) begin\n      {a, b} = i;\n      #10;\n      total++;\n      if (out === (a & b)) begin\n        passed++;\n        $display(\"PASS: a=%0d, b=%0d, out=%0d\", a, b, out);\n      end else begin\n        $display(\"FAIL: a=%0d, b=%0d, out=%0d (expected %0d)\", a, b, out, a & b);\n      end\n    end\n    \n    $display(\"\\nTest Results: %0d/%0d passed\", passed, total);\n    if (passed === total) $display(\"PASS\"); else $display(\"FAIL\");\n    $finish;\n  end\nendmodule"
+    "template": "`timescale 1ns/1ps\nmodule top_module(\n  input  logic a,\n  input  logic b,\n  output logic out\n);\n  // Implement AND gate\n  assign out = a & b;\n\n  // Assertion: output must always match AND logic\n  always_comb begin\n    assert (out === (a & b))\n      else $error(\"AND gate failed: a=%0d, b=%0d, out=%0d\", a, b, out);\n  end\n\n  initial begin\n    $display(\"Starting AND gate simulation with assertions...\");\n  end\nendmodule",
+    "testbench_sv": "`timescale 1ns/1ps\nmodule tb();\n  logic a, b;\n  logic out;\n  integer passed = 0;\n  integer total = 0;\n\n  top_module dut (.*);\n\n  initial begin\n    $display(\"Testing AND gate with SystemVerilog...\");\n\n    // Test all combinations\n    for (int i = 0; i < 4; i++) begin\n      {a, b} = i;\n      #10;\n      total++;\n      if (out === (a & b)) begin\n        passed++;\n        $display(\"PASS: a=%0d, b=%0d, out=%0d\", a, b, out);\n      end else begin\n        $display(\"FAIL: a=%0d, b=%0d, out=%0d (expected %0d)\", a, b, out, a & b);\n      end\n    end\n\n    $display(\"\\nTest Results: %0d/%0d passed\", passed, total);\n    if (passed === total)\n      $display(\"PASS\");\n    else\n      $display(\"FAIL\");\n\n    $finish;\n  end\nendmodule"
+  },
+  {
+    "id": "or_gate_assert_only",
+    "title": "OR Gate – Assertion Only",
+    "description": "Implement a 2-input OR gate and verify correctness using only SystemVerilog assertions inside the design.",
+    "difficulty": "easy",
+    "category": "Assertions",
+    "supports_sv": true,
+    "has_assertions": true,
+    "template": "`timescale 1ns/1ps\nmodule top_module(\n  input  logic a,\n  input  logic b,\n  output logic out\n);\n  // OR gate logic\n  assign out = a | b;\n\n  // Assertion-only verification\n  always_comb begin\n    assert (out === (a | b))\n      else $fatal(1, \"Assertion failed: a=%0d b=%0d out=%0d\", a, b, out);\n  end\nendmodule",
+    "testbench_sv": "`timescale 1ns/1ps\nmodule tb();\n  logic a, b;\n  logic out;\n\n  top_module dut (.*);\n\n  initial begin\n    for (int i = 0; i < 4; i++) begin\n      {a, b} = i;\n      #5;\n    end\n    $display(\"Simulation completed – assertions verified logic\");\n    $finish;\n  end\nendmodule"
+  },
+  {
+    "id": "unique_roll_numbers",
+    "title": "Unique Student Roll Numbers",
+    "description": "Generate 3 student roll numbers such that each roll number is between 1 and 100 and all three are different.",
+    "difficulty": "easy",
+    "category": "Constraints",
+    "supports_sv": true,
+    "has_assertions": false,
+    "template": "class roll_numbers;\n  rand int r1, r2, r3;\n\n  constraint range_c {\n    r1 inside {[1:100]};\n    r2 inside {[1:100]};\n    r3 inside {[1:100]};\n  }\n\n  constraint unique_c {\n    r1 != r2;\n    r2 != r3;\n    r1 != r3;\n  }\nendclass",
+    "testbench_sv": "module tb();\n  initial begin\n    roll_numbers rn = new();\n    if (rn.randomize())\n      $display(\"Rolls: %0d %0d %0d\", rn.r1, rn.r2, rn.r3);\n    else\n      $display(\"Randomization failed\");\n    $finish;\n  end\nendmodule"
+  },
+
+  {
+    "id": "aligned_packet",
+    "title": "Aligned Packet Generation",
+    "description": "Generate a packet ensuring addr is word-aligned and id is within a valid range.",
+    "difficulty": "easy",
+    "category": "Constraints",
+    "supports_sv": true,
+    "has_assertions": false,
+    "template": "class packet;\n  rand bit [31:0] addr;\n  rand bit [31:0] data;\n  rand bit [3:0]  id;\n\n  constraint addr_align_c { addr % 4 == 0; }\n  constraint id_range_c  { id inside {[1:10]}; }\nendclass",
+    "testbench_sv": "module tb();\n  initial begin\n    packet p = new();\n    if (p.randomize())\n      $display(\"addr=%0h data=%0h id=%0d\", p.addr, p.data, p.id);\n    else\n      $display(\"Randomization failed\");\n    $finish;\n  end\nendmodule"
+  },
+  {
+    "id": "secure_pin",
+    "title": "Secure 4-Digit PIN",
+    "description": "Generate a 4-digit PIN with no repeated digits and the first digit not equal to zero.",
+    "difficulty": "medium",
+    "category": "Constraints",
+    "supports_sv": true,
+    "has_assertions": false,
+    "template": "class pin_gen;\n  rand int pin[4];\n\n  constraint digit_range_c {\n    foreach (pin[i]) pin[i] inside {[0:9]};\n  }\n\n  constraint no_repeat_c {\n    unique {pin};\n  }\n\n  constraint no_leading_zero_c {\n    pin[0] != 0;\n  }\nendclass",
+    "testbench_sv": "module tb();\n  initial begin\n    pin_gen p = new();\n    if (p.randomize())\n      $display(\"PIN: %0d%0d%0d%0d\", p.pin[0], p.pin[1], p.pin[2], p.pin[3]);\n    else\n      $display(\"Randomization failed\");\n    $finish;\n  end\nendmodule"
+  },
+  {
+    "id": "req_ack_assert",
+    "title": "Request Acknowledge Assertion",
+    "description": "Assert that ack is asserted within 3 cycles after req.",
+    "difficulty": "medium",
+    "category": "Assertions",
+    "supports_sv": true,
+    "has_assertions": true,
+    "template": "`timescale 1ns/1ps\nmodule top_module(input logic clk, req, ack);\n  property req_ack_p;\n    @(posedge clk) req |-> ##[1:3] ack;\n  endproperty\n\n  assert property (req_ack_p)\n    else $fatal(\"Ack not received within 3 cycles\");\nendmodule",
+    "testbench_sv": "`timescale 1ns/1ps\nmodule tb();\n  logic clk = 0, req = 0, ack = 0;\n  always #5 clk = ~clk;\n\n  top_module dut (.*);\n\n  initial begin\n    #10 req = 1; #10 req = 0;\n    #20 ack = 1; #10 ack = 0;\n    #50 $finish;\n  end\nendmodule"
+  },
+  {
+    "id": "fifo_underflow_assert",
+    "title": "FIFO Underflow Protection",
+    "description": "Ensure that a read never occurs when FIFO is empty.",
+    "difficulty": "medium",
+    "category": "Assertions",
+    "supports_sv": true,
+    "has_assertions": true,
+    "template": "`timescale 1ns/1ps\nmodule top_module(input logic clk, rd_en, empty);\n  property no_underflow_p;\n    @(posedge clk) !(rd_en && empty);\n  endproperty\n\n  assert property (no_underflow_p)\n    else $fatal(\"FIFO underflow detected\");\nendmodule",
+    "testbench_sv": "`timescale 1ns/1ps\nmodule tb();\n  logic clk = 0, rd_en = 0, empty = 1;\n  always #5 clk = ~clk;\n\n  top_module dut (.*);\n\n  initial begin\n    #10 rd_en = 1;\n    #20 empty = 0;\n    #20 rd_en = 0;\n    #50 $finish;\n  end\nendmodule"
   },
   {
     "id": "dff_sv",
